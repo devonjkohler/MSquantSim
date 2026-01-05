@@ -89,16 +89,12 @@ def simulate_using_copula(dataset, num_simulations=1, samples_per_simulation=Non
     
     if num_simulations == 1:
         simulation = copula_model(dataset, samples_per_simulation)
-    
     else:
-
-        with tqdm_joblib(tqdm(total=num_simulations, 
-                              desc="Running copula simulations")):
-            simulation = Parallel(n_jobs=-2)(
-                delayed(copula_model)(dataset, samples_per_simulation)
-                for _ in range(num_simulations)
-            )
-
+        simulation = Parallel(n_jobs=-2)(
+            delayed(copula_model)(dataset, samples_per_simulation)
+            for _ in tqdm(range(num_simulations), 
+                          desc="Running copula simulations"))
+        
     # Create output directory if it doesn't exist
     if output_dir is not None:
         if not os.path.exists(output_dir):
@@ -163,15 +159,11 @@ def simulate_using_tvae(dataset, metadata=None, num_simulations=1,
     
     if num_simulations == 1:
         simulation = tvae_model(dataset, metadata, samples_per_simulation)
-    
     else:
-
-        with tqdm_joblib(tqdm(total=num_simulations, 
-                              desc="Running tvae simulations")):
-            simulation = Parallel(n_jobs=-2)(
-                delayed(tvae_model)(dataset, metadata, samples_per_simulation)
-                for _ in range(num_simulations)
-            )
+        simulation = Parallel(n_jobs=-2)(
+            delayed(tvae_model)(dataset, metadata, samples_per_simulation)
+            for _ in tqdm(range(num_simulations), 
+                          desc="Running tvae simulations"))
 
     # Create output directory if it doesn't exist
     if output_dir is not None:
@@ -238,15 +230,11 @@ def simulate_using_per_protein(dataset, num_simulations=1,
     
     if num_simulations == 1:
         simulation = per_protein_model(dataset, means, variances, samples_per_simulation)
-
     else:
-
-        with tqdm_joblib(tqdm(total=num_simulations, 
-                              desc="Running per-protein simulations")):
-            simulation = Parallel(n_jobs=-2)(
-                delayed(per_protein_model)(dataset, means, variances, samples_per_simulation)
-                for _ in range(num_simulations)
-            )
+        simulation = Parallel(n_jobs=-2)(
+            delayed(per_protein_model)(dataset, means, variances, samples_per_simulation)
+            for _ in tqdm(range(num_simulations), 
+                          desc="Running per-protein simulations"))
 
     # Create output directory if it doesn't exist
     if output_dir is not None:
