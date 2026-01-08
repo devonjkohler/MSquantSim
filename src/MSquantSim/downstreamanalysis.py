@@ -8,15 +8,11 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 from tqdm_joblib import tqdm_joblib
 
-def train_rf(X, y, sample_size, replace):
-    
-    selected_samples = np.random.choice(len(X), size=sample_size, replace=replace)
-    X_sampled = X.iloc[selected_samples]
-    y_sampled = y.iloc[selected_samples]
+def train_rf(X, y):
 
     # Split the data into training and testing sets
     X_train, X_test, y_train, y_test = train_test_split(
-        X_sampled, y_sampled, test_size=0.2, random_state=42)
+        X, y, test_size=0.2, random_state=42)
 
     param_grid = {
         "n_estimators": [200, 500, 1000],
@@ -27,7 +23,7 @@ def train_rf(X, y, sample_size, replace):
         "class_weight": [None, "balanced"]
     }
     
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cv = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
 
     search = RandomizedSearchCV(
         RandomForestClassifier(),
@@ -46,16 +42,16 @@ def train_rf(X, y, sample_size, replace):
         
     return accuracy
 
-def run_random_forest(data, y_label, sample_size, replace, n_runs=100):
+def run_random_forest(data, y_label, n_runs=100):
     
     # Assume 'condition' is the target variable column in your CSV
     X = data.drop(y_label, axis=1)
     y = data[y_label]
     
     with tqdm_joblib(tqdm(total=n_runs, 
-                              desc="Running copula simulations")):
+                              desc="Running simulations")):
             model_accuracy_list = Parallel(n_jobs=-2)(
-                delayed(train_rf)(X, y, sample_size, replace)
+                delayed(train_rf)(X, y)
                 for _ in range(n_runs)
             )
 

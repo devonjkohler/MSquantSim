@@ -3,11 +3,10 @@ from __future__ import annotations
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
-from dataclasses import dataclass
-from typing import Dict, Iterable, Tuple
-from sklearn.decomposition import PCA
-
+from table_evaluator import TableEvaluator
+from joblib import Parallel, delayed
 
 def plot_corr(
     df: pd.DataFrame,
@@ -115,84 +114,126 @@ def plot_corr(
     return fig, ax
 
 def calculate_similarity_score(
-        csv_path1,
-        csv_path2,
-        reference_data=None,
-        cat_cols=['Condition'],
-        target_col='Condition',
-        condition_mapping={'left_only': 0, 'right_only': 1, 'both': 2},
-        plot_settings=None
+        simulated_data,
+        real_data,
+        group_col='Condition'
 ):
     """
-    Load two CSV datasets, merge them, and evaluate using TableEvaluator.
+    Calculate a similarity score comparing simulated and real tabular data.
 
-    Parameters:
-    -----------
-    csv_path1 : str
-        Path to the first CSV file
-    csv_path2 : str
-        Path to the second CSV file
-    reference_data : pandas DataFrame, optional
-        Reference data to compare with the merged dataset. If None,
-        the merged dataset will be used as reference data.
-    cat_cols : list, default ['Condition']
-        List of categorical columns for TableEvaluator
-    target_col : str, default 'Condition'
-        Target column for evaluation
-    condition_mapping : dict, default {'left_only': 0, 'right_only': 1, 'both': 2}
-        Mapping for the _merge indicator to Condition values
-    plot_settings : dict, optional
-        Dictionary of settings for plots in TableEvaluator (e.g., {'figsize': (10, 5)})
+    This is a thin wrapper around a TableEvaluator that computes how closely
+    simulated_data matches real_data with respect to a grouping/target column.
+
+    Args:
+        simulated_data (pandas.DataFrame): Simulated dataset to evaluate.
+        real_data (pandas.DataFrame): Real/ground-truth dataset to compare against.
+        group_col (str, optional): Name of the categorical/target column used by
+            the TableEvaluator for grouping or conditional evaluation. Defaults to
+            'Condition'.
 
     Returns:
-    --------
-    table_evaluator : TableEvaluator
-        The initialized TableEvaluator object after running evaluate()
-    merged_df : pandas DataFrame
-        The merged dataframe with Condition column
+        Any: The raw output returned by TableEvaluator.evaluate(..., return_outputs=True).
+        The exact structure depends on the TableEvaluator implementation (commonly
+        a dict or object containing numeric similarity metrics, per-column reports,
+        and any diagnostic outputs).
+
+    Raises:
+        ValueError: If group_col is not present in either simulated_data or real_data.
+        NameError/ImportError: If TableEvaluator is not available in the runtime
+            (i.e., not imported or defined).
+
+    Example:
+        >>> # simulated_df and real_df are pandas.DataFrame instances and both contain
+        >>> # a column named 'Condition'
+        >>> results = calculate_similarity_score(simulated_df, real_df, group_col='Condition')
     """
-    # Print information about files being loaded
-    print(f"Loading datasets:\n - {os.path.basename(csv_path1)}\n - {os.path.basename(csv_path2)}")
-
-    # Load the CSV files
-    df1 = pd.read_csv(csv_path1)
-    df2 = pd.read_csv(csv_path2)
-
-    print(f"Loaded shapes: {df1.shape}, {df2.shape}")
-
-    # Merge datasets
-    merged_df = pd.merge(df1, df2, how='outer', indicator=True)
-
-    # Create Condition column based on the merge indicator
-    merged_df['Condition'] = merged_df['_merge'].map(condition_mapping)
-
-    # Drop the _merge column
-    merged_df = merged_df.drop('_merge', axis=1)
-
-    # If reference_data is None, use merged_df as both datasets
-    if reference_data is None:
-        reference_data = merged_df.copy()
-
-    # Print information about merged data
-    condition_counts = merged_df['Condition'].value_counts().to_dict()
-    print(f"Merged data shape: {merged_df.shape}")
-    print(f"Condition counts: {condition_counts}")
 
     # Initialize TableEvaluator
-    table_evaluator = TableEvaluator(reference_data, merged_df, cat_cols=cat_cols)
-
-    # Configure plot settings if provided
-    if plot_settings:
-        # Apply plot settings (assuming TableEvaluator has methods to set these)
-        if 'figsize' in plot_settings:
-            # This would depend on how TableEvaluator implements figure size settings
-            # You may need to adjust based on actual TableEvaluator API
-            plt.rcParams['figure.figsize'] = plot_settings['figsize']
-
-        # Add other plot settings as needed
+    table_evaluator = TableEvaluator(real_data, simulated_data, 
+                                     cat_cols=[group_col])
 
     # Run evaluation
-    table_evaluator.evaluate(target_col=target_col)
+    similarity_results = table_evaluator.evaluate(
+        target_col=group_col, notebook = False, 
+        verbose = False, return_outputs = True)
 
-    # Return the table_evaluator and merged_df for further analysis if needed
-    return table_evaluator, merged_df
+    return similarity_results
+
+def _evaluate_single_sim_pair(
+    healthy_df,
+    disease_df,
+    real_data,
+    condition_column,
+    condition_label_healthy,
+    condition_label_disease,
+):
+    """
+    Evaluate one pair of simulated DataFrames and return a flat dict of metric->value.
+    """
+    h = healthy_df.copy()
+    d = disease_df.copy()
+
+    # Replace inf/-inf with NaN and fill NaNs with column mean (numeric columns only)
+    for df in (h, d):
+        num_cols = df.select_dtypes(include=[np.number]).columns
+        for col in num_cols:
+            # Convert infinities to NaN
+            df[col] = df[col].replace([np.inf, -np.inf], np.nan)
+            # Compute mean excluding NaNs
+            mean_val = df[col].mean(skipna=True)
+            if pd.notna(mean_val):
+                df[col].fillna(mean_val, inplace=True)
+    
+    h.loc[:, condition_column] = condition_label_healthy
+    d.loc[:, condition_column] = condition_label_disease
+
+    merged_sim_data = pd.concat([h, d], axis=0, ignore_index=True)
+
+    res = calculate_similarity_score(merged_sim_data, real_data, group_col=condition_column)
+    res = res["Overview Results"]
+    
+    flat = {}
+    for key, value in res.items():
+        if isinstance(value, dict) and "result" in value:
+            flat[key] = value["result"]
+        else:
+            flat[key] = value
+    
+    return flat
+
+def similarity_across_simulations(sim_data_healthy, 
+                                  sim_data_disease,
+                                  real_data,
+                                  condition_column,
+                                  condition_label_healthy,
+                                  condition_label_disease):
+    
+    """
+    Compute and aggregate similarity scores between simulated and real datasets across multiple simulation replicates.
+    Parallelized using joblib.
+    """
+    # Basic checks
+    if len(sim_data_healthy) != len(sim_data_disease):
+        raise ValueError("sim_data_healthy and sim_data_disease must have the same length.")
+    if len(sim_data_healthy) == 0:
+        return {}
+
+    # Parallel evaluation across replicates
+    results_list = Parallel(n_jobs=-1)(
+        delayed(_evaluate_single_sim_pair)(
+            sim_data_healthy[i],
+            sim_data_disease[i],
+            real_data,
+            condition_column,
+            condition_label_healthy,
+            condition_label_disease,
+        ) for i in tqdm(range(len(sim_data_healthy)), desc="Evaluating simulations")
+    )
+
+    # Aggregate results: key -> list of values across replicates
+    all_sim_results = {}
+    for res in results_list:
+        for key, val in res.items():
+            all_sim_results.setdefault(key, []).append(val)
+
+    return all_sim_results

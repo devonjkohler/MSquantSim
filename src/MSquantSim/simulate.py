@@ -11,7 +11,7 @@ import os
 from sdv.single_table import TVAESynthesizer
 from sdv.metadata import SingleTableMetadata
 
-from copulas.multivariate import GaussianMultivariate
+from copulas.multivariate import GaussianMultivariate, VineCopula
 
 import warnings
 warnings.filterwarnings('ignore')
